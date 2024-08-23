@@ -1,0 +1,151 @@
+function enviarPlanilhaPorEmail() {
+  var planilha = SpreadsheetApp.getActiveSpreadsheet();
+  var nomePlanilha = planilha.getName();
+  var urlPlanilha = planilha.getUrl();
+
+  var abaMotorista = planilha.getSheetByName("MOTORISTA");
+  var valorCelulaB2 = abaMotorista.getRange("B2").getValue();
+  var valorCelulaB3 = abaMotorista.getRange("B3").getValue();
+  var valorCelulaB11 = abaMotorista.getRange("B11").getValue(); // Conteúdo da célula B11 (NOME MOTORISTA)
+  var valorCelulaB12 = abaMotorista.getRange("B12").getValue(); // Conteúdo da célula B12 (CNH)
+  var valorCelulaB13 = abaMotorista.getRange("B13").getValue(); // Conteúdo da célula B13 (TRANSPORTADORA)
+  var valorCelulaB14 = abaMotorista.getRange("B14").getValue(); // Conteúdo da célula B14 (PLACA DO VEÍCULO)
+  var valorCelulaB15 = abaMotorista.getRange("B15").getValue(); // Conteúdo da célula B15 (PLACA DA CARRETA)
+  var valorCelulaB16 = abaMotorista.getRange("B16").getValue(); // Conteúdo da célula B16 (Nº LACRE)
+
+  // Concatena os valores das células B14 e B15 com uma barra entre eles
+  var concatenacaoB14B15 = valorCelulaB14 + "/" + valorCelulaB15;
+
+  // Obtém a data e horário atual
+  var dataHoraAtual = new Date();
+  var dataHoraFormatada = Utilities.formatDate(dataHoraAtual, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+
+  // Abre a planilha Base Expedição GDM
+  var planilhaBaseExpedicao = SpreadsheetApp.openById("1bQDmRpAodDLsp4UT7iSm4RYa5RP6cLB1cL8dDyuju9g");
+  var abaBaseExpedicao = planilhaBaseExpedicao.getSheetByName("Base_Expedição");
+
+  // Define a faixa de busca a partir da linha 1800
+  var startRow = 1800;
+  var lastRow = abaBaseExpedicao.getLastRow();
+  var valoresColunaB = abaBaseExpedicao.getRange("B" + startRow + ":B" + lastRow).getValues();
+  
+  for (var i = 0; i < valoresColunaB.length; i++) {
+    if (valoresColunaB[i][0].toString().substring(0, 10) == valorCelulaB2.toString().substring(0, 10)) {
+      var linhaAtual = startRow + i;
+      // Insere a concatenação dos valores das células B14 e B15 na coluna G da linha correspondente
+      abaBaseExpedicao.getRange(linhaAtual, 7).setValue(concatenacaoB14B15);
+      // Insere a data e horário atual na coluna L da linha correspondente
+      abaBaseExpedicao.getRange(linhaAtual, 12).setValue(dataHoraFormatada);
+      // Atualiza o valor da coluna M para "Expedido"
+      var cellM = abaBaseExpedicao.getRange(linhaAtual, 13);
+      cellM.setValue("Expedido");
+
+      // Remove a formatação condicional existente na coluna M
+      var rules = abaBaseExpedicao.getConditionalFormatRules();
+      rules = rules.filter(function(rule) {
+        return rule.getRanges().indexOf(cellM) === -1;
+      });
+
+      // Aplica a nova formatação condicional na coluna M
+      var newRule = SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo("Expedido")
+        .setBackground("#009961") // fundo verde
+        .setFontColor("#000000") // texto preto
+        .setRanges([cellM])
+        .build();
+      rules.push(newRule);
+      abaBaseExpedicao.setConditionalFormatRules(rules);
+
+      Logger.log("Valores inseridos, status atualizado e formatação aplicada na linha: " + linhaAtual);
+      break;
+    }
+  }
+
+  // Personalize os seguintes valores conforme necessário
+  var destinatarios = ["lucas.p.silva@avon.com", "vinicius.correa@avon.com", "andre.marinho@avon.com", "ellenmartins@natura.net", "natura@reiterlog.com", "SegurancaNEN@natura.net", "expedicaogdm@natura.net", "glaucia.silva@natura.net", "annygomes@natura.net"];
+  var assunto = "INFOLOG CAJAMAR X HUB CABREUVA CARGA: " + valorCelulaB2 + " / PEDIDO: " + valorCelulaB3;
+
+  // Constrói o corpo do e-mail
+  var corpoEmail = "Olá,\n\nSegue em anexo a carga com destino " + nomePlanilha + ".\n\nInformações Adicionais:\n\nNOME MOTORISTA: " + valorCelulaB11 + "\nCNH: " + valorCelulaB12 + "\nTRANSPORTADORA: " + valorCelulaB13 + "\nPLACA DO VEÍCULO: " + valorCelulaB14 + "\nPLACA DA CARRETA: " + valorCelulaB15 + "\nNº LACRE: " + valorCelulaB16 + "\n\nAtenciosamente";
+
+  try {
+    // Imprime apenas a primeira página do PDF
+    var pdfBlob = extrairPrimeiraPaginaPDF(planilha);
+    var pdfFile = DriveApp.createFile(pdfBlob).setName(nomePlanilha + "_Primeira_Pagina.pdf");
+
+    // Busca um arquivo semelhante ao valor da célula B2 na pasta do Google Drive
+    var anexoGoogleDrive = buscarArquivoSemelhante(valorCelulaB2);
+
+    // Verifica se há anexos válidos antes de enviar o e-mail
+    var anexos = [];
+    if (pdfFile) anexos.push(pdfFile);
+    if (anexoGoogleDrive) anexos.push(anexoGoogleDrive);
+
+    // Envia o e-mail com os anexos válidos
+    MailApp.sendEmail({
+      to: destinatarios.join(),
+      subject: assunto,
+      body: corpoEmail,
+      attachments: anexos
+    });
+
+    // Exclui os arquivos temporários
+    if (pdfFile) pdfFile.setTrashed(true);
+  } catch (error) {
+    Logger.log("Ocorreu um erro: " + error);
+    throw new Error("Falha ao enviar o e-mail: " + error);
+  }
+}
+
+// Função para extrair apenas a primeira página do PDF
+function extrairPrimeiraPaginaPDF(planilha) {
+  var abaHubCabreuva = planilha.getSheetByName("HUB CABREUVA");
+  if (!abaHubCabreuva) {
+    throw new Error("A aba 'HUB CABREUVA' não foi encontrada na planilha.");
+  }
+
+  // Define as opções de impressão
+  var options = {
+    'size': 'A4',
+    'landscape': false, // Define a orientação do PDF como vertical
+    'fitw': true
+  };
+
+  // Converte a aba para PDF
+  var url = planilha.getUrl();
+  url = url.replace(/edit$/, '');
+  var exportUrl = url + 'export?exportFormat=pdf&format=pdf' + 
+                  '&size=A4' + 
+                  '&portrait=true' +  // Configura a orientação do PDF como vertical
+                  '&fitw=true' +  
+                  '&sheetnames=false&printtitle=false&pagenumbers=false' + 
+                  '&gridlines=false&fzr=false';
+
+  var response = UrlFetchApp.fetch(exportUrl + '&gid=' + abaHubCabreuva.getSheetId(), {
+    headers: {
+      'Authorization': 'Bearer ' +  ScriptApp.getOAuthToken()
+    }
+  });
+
+  if (response.getResponseCode() !== 200) {
+    throw new Error('Erro ao criar PDF: ' + response.getContentText());
+  }
+
+  // Retorna o blob do PDF
+  return response.getBlob();
+}
+
+// Função para buscar um arquivo com nome semelhante na pasta do Google Drive
+function buscarArquivoSemelhante(nomeArquivo) {
+  var pastaAtual = DriveApp.getRootFolder();
+  var arquivos = pastaAtual.getFiles();
+  
+  while (arquivos.hasNext()) {
+    var arquivo = arquivos.next();
+    if (arquivo.getName().indexOf(nomeArquivo) !== -1 && arquivo.getMimeType() != "application/pdf") {
+      return arquivo;
+    }
+  }
+  
+  return null;
+}
